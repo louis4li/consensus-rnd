@@ -12,7 +12,7 @@ Review PR `${PR_NUMBER}` against `${BASE_BRANCH}` from architecture compliance o
 
 ## Checklist
 
-- Refactor self-doc follows `${HOST_REFACTOR_COMMENT_POLICY}`: empty/`self-doc-comment` requires host-style Old/New comments; `none` forbids those source comments; other values fail-closed.
+- Refactor self-doc follows `${HOST_REFACTOR_COMMENT_POLICY}`: empty/`self-doc-comment` requires host-style Old/New comments; `none`: absence is compliant, and new Old/New/iteration refactor-history source comments must be rejected; invalid values fail-closed, do not guess.
 - Every net-changed concept maps to PROJECT_RULES/AGENTS; cite verbatim for rejects.
 - Diff stays in scope_paths or documented SCOPE_EXTEND.
 - No split of one business entity into read/write actors/stores.
@@ -22,7 +22,15 @@ Out of scope: tests, performance, readability.
 
 ## Output
 
-Write `${REVIEW_OUTPUT_PATH}` with frontmatter, Verdict, Evidence, What would change your verdict. Verdicts: approve, comment(advisory), reject(blocking clause regression). Phase 8 truth table: reject=0 and approve>=1 may merge; comment is advisory evidence and not approval.
+Write `${REVIEW_OUTPUT_PATH}` with frontmatter, Verdict, Evidence, What would change your verdict. Verdicts: approve, comment(advisory), reject(blocking clause regression). Review-gate truth table: reject=0 and approve>=1 may merge; comment is advisory evidence and not approval.
+
+## Verdict
+
+approve | comment | reject
+
+## Evidence
+
+Specific file:line plus clause evidence for every issue.
 
 End with marker line: `REVIEW_DONE:${PR_NUMBER}:architect:<verdict>`
 
@@ -49,5 +57,7 @@ Only the markers listed above are valid role-routing markers for this prompt. Do
 ## AI 内容标识符(强制)
 
 GitHub content ends with the sentinel as final standalone line; internal marker-bearing artifacts put it penultimate:
+
+sentinel penultimate line before final routing marker.
 
     ⟦AI:AUTO-LOOP⟧

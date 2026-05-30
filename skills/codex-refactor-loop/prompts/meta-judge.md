@@ -48,7 +48,7 @@ Only the markers listed above are valid role-routing markers for this prompt. Do
 - Do not invent a 4th hybrid framing; converge if no solver covers the right plan.
 - You do not dispatch; controller does.
 - You DO post to GitHub directly per `prompts/_github-post-rules.md`.
-- 中文 by default; no mandatory parallel English. Numbers > adjectives.
+- 中文 by default. Numbers > adjectives.
 
 ## GitHub post(强制)
 
@@ -57,5 +57,7 @@ Only the markers listed above are valid role-routing markers for this prompt. Do
 ## AI 内容标识符(强制)
 
 GitHub content ends with the sentinel as final standalone line; internal marker-bearing artifacts put it penultimate:
+
+sentinel penultimate line before final routing marker.
 
     ⟦AI:AUTO-LOOP⟧

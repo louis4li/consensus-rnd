@@ -11,10 +11,15 @@ Artifact profile: marker-only-work-unit
 3. `docs/audit-scorecard/` 仅作参考,不可作唯一线索。
 4. 当前分支:`git branch --show-current`。
 
-## 身份与覆盖
+## 渲染身份 fail-closed(强制)
 
-- 若渲染后 `ITERATION` 为空/空白/未替换,只输出 `AUDIT_INCOMPLETE:missing-iteration`;不得写空 iteration artifact。
-- 同一时刻只能有一个 active `audit-iter-${ITERATION}` fallback。
+- 模板渲染后若 `ITERATION` 为空/空白/未替换,立即输出 `AUDIT_INCOMPLETE:missing-iteration` 并停止。
+- 禁止写入 `$REPO_ROOT/.refactor-loop/runs/audit-iter-.md` 或 `$REPO_ROOT/.refactor-loop/runs/audit-iter--candidates.ndjson`。
+- audit fallback 同一时刻只能有一个 active `audit-iter-${ITERATION}`。
+
+## 强制流程
+
+- 覆盖:
 - 为每条规则分配 `rule_id`;每条至少记录 1 个 grep/analyzer 命令+命中数,并打开足够生产文件验证。
 - 整体 `total_opened_files >= 60`;候选文件 `.refactor-loop/runs/audit-iter-${ITERATION}-candidates.ndjson` 至少 25 行,除非所有 analyzer 证明确实 0 命中。
 - 固定 analyzer pack 由 `$SOURCE_GLOBS` / `$PROJECT_RULES` / host 配置决定;未配置时覆盖结构原语、边界/序列化、本地状态、调度、replay/projection、string identity/routing。

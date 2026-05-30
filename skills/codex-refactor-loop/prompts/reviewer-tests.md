@@ -22,7 +22,15 @@ Out of scope: production architecture, performance, readability.
 
 ## Output
 
-Write `${REVIEW_OUTPUT_PATH}` with frontmatter, Verdict, Evidence, What would change your verdict. Verdicts: approve, comment(advisory), reject(real gap on new logic/skip/sleep/assertion weakening). Phase 8 truth table: reject=0 and approve>=1 may merge; comments alone are advisory.
+Write `${REVIEW_OUTPUT_PATH}` with frontmatter, Verdict, Evidence, What would change your verdict. Verdicts: approve, comment(advisory), reject(real gap on new logic/skip/sleep/assertion weakening). Review-gate truth table: reject=0 and approve>=1 may merge; comments alone are advisory.
+
+## Verdict
+
+approve | comment | reject
+
+## Evidence
+
+Specific test/file:line plus concrete coverage or quality issue.
 
 End with marker: `REVIEW_DONE:${PR_NUMBER}:tests:<verdict>`
 
@@ -48,5 +56,7 @@ Only the markers listed above are valid role-routing markers for this prompt. Do
 ## AI 内容标识符(强制)
 
 GitHub content ends with the sentinel as final standalone line; internal marker-bearing artifacts put it penultimate:
+
+sentinel penultimate line before final routing marker.
 
     ⟦AI:AUTO-LOOP⟧

@@ -4,7 +4,7 @@ Artifact profile: github-ai-post-body
 
 Any direct-post prompt writes user-facing GitHub content itself with `gh`; controller is not a writer relay.
 
-## Body structure
+## Body 结构(强制)
 
 ```markdown
 ## 🤖 <headline>
@@ -34,10 +34,11 @@ verbatim raw output
 
 ## Hard rules
 
-- First line must start with `## 🤖 `; `comment-monitor` uses it to avoid reacting to controller posts.
+- 第一行 `## 🤖 ` 开头; First line must start with `## 🤖 `; `comment-monitor` uses it to avoid reacting to controller posts.
 - 中文 only; code identifiers, paths, schema fields, errors, and clause quotes may remain original.
 - TL;DR ≤ 6 lines.
-- Raw artifact must be folded under `<details>`; GitHub body must be self-contained and cannot rely on a local `.refactor-loop/runs/*.md` path as sole authority.
+- **GitHub body 必须自包含**: raw artifact 必折叠 under `<details>`; Raw artifact must be folded; GitHub body must be self-contained and cannot rely on a local `.refactor-loop/runs/*.md` path as sole authority.
+- Local debug paths may appear only under `<details><summary>本机调试线索</summary>` and 永远不是唯一授权来源.
 - Explain first use of jargon; numbers > adjectives; no filler like "comprehensive review".
 - Final standalone line must be `⟦AI:AUTO-LOOP⟧`.
 

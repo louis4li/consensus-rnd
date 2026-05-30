@@ -232,6 +232,40 @@ class RuntimeShellRemovalSourceTests(unittest.TestCase):
             combined,
         )
 
+    def test_prompt_token_diet_source_contracts(self) -> None:
+        prompts = sorted((SKILL_ROOT / "prompts").glob("*.md"))
+        self.assertEqual(19, len(prompts))
+        total_lines = sum(len(path.read_text(encoding="utf-8").splitlines()) for path in prompts)
+        self.assertLessEqual(total_lines, 1250)
+
+        combined = "\n".join([SKILL_ROOT.joinpath("SKILL.md").read_text(encoding="utf-8"), *[path.read_text(encoding="utf-8") for path in prompts]])
+        for forbidden in (
+            "PromptPartial" + "V1",
+            "_prompt-base.md",
+            "render_prompt.py",
+            "delete/defer",
+            "delete / defer",
+            "Deferrable",
+            "tracking issue creation suggestion",
+        ):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, combined)
+
+    def test_prompt_token_diet_keeps_marker_and_posting_contracts(self) -> None:
+        prompt_text = "\n".join(path.read_text(encoding="utf-8") for path in sorted((SKILL_ROOT / "prompts").glob("*.md")))
+        github_rules = (SKILL_ROOT / "prompts" / "_github-post-rules.md").read_text(encoding="utf-8")
+
+        self.assertIn("MarkerEmissionContract: single-valid-invalid-role-marker-source", prompt_text)
+        self.assertIn("Only the markers listed above are valid role-routing markers", prompt_text)
+        self.assertIn("本 prompt 是 marker/artifact-only", prompt_text)
+        self.assertIn("gh pr create", prompt_text)
+        self.assertIn("gh issue edit --add-label", prompt_text)
+        self.assertIn("First line must start with `## 🤖 `", github_rules)
+        self.assertIn("TL;DR ≤ 6 lines", github_rules)
+        self.assertIn("Raw artifact must be folded", github_rules)
+        self.assertIn("Final standalone line must be `⟦AI:AUTO-LOOP⟧`", github_rules)
+        self.assertIn("comment-monitor", github_rules)
+
 
 if __name__ == "__main__":
     unittest.main()

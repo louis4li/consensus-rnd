@@ -4,9 +4,11 @@ Artifact profile: marker-only-work-unit
 
 Resolve a stalled review-gate/design-consensus route without writing code.
 
-## Mandatory no-framing drop
+## Priority 0: mandatory no-framing drop
 
 If design-consensus evidence shows convergence round `N >= 3`, unchanged solver text/verdict direction across 3+ rounds, no maintainer input, and no distinct actionable framing, emit `META_RESOLVED:drop:no-actionable-framing-after-N-rounds`. Do not re-design or escalate-human for that same evidence.
+
+Do not route to re-design unless you can cite a concrete current maintainer directive/current authorization artifact or a clearly distinct actionable framing.
 
 Before `escalate-human` or `re-design`, check:
 

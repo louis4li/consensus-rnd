@@ -21,7 +21,8 @@ Research evidence(file:line + invariant), write proposed body to `.refactor-loop
 - `schema: "ManualIssueTriageDecision"`
 - `verdict: "accept"`
 - body/comment artifact paths under `.refactor-loop/runs/`
-- controller-provided add/remove labels
+- add_labels: catalog-derived accept label bundle from controller header
+- remove_labels: catalog-derived triage removal label from controller header
 - `sentinel_present: true`, `lifecycle_owner: "controller"`, `lifecycle_authority: false`
 
 ## Reject path
@@ -51,3 +52,5 @@ Only the markers listed above are valid role-routing markers for this prompt. Do
 ## AI 内容标识符
 
 GitHub comments end with sentinel as final standalone line. Marker-bearing internal artifacts put `⟦AI:AUTO-LOOP⟧` on the penultimate line.
+
+sentinel penultimate line before final routing marker.

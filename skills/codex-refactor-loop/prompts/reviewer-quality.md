@@ -15,13 +15,21 @@ Review PR `${PR_NUMBER}` against `${BASE_BRANCH}` for readability, naming, simpl
 - Names express intent and follow host vocabulary; generic Manager/Handler/Helper without evidence is at most comment.
 - No dead code, unused new public surface, harmful single-implementer abstraction, unrelated drive-by cleanup, filler comments, or commented-out code.
 - Extract >=3 near-identical copies; prefer modified methods <=80 lines and <=~15 branches.
-- Refactor self-doc policy: empty/`self-doc-comment` requires clear Old/New comments; `none` means missing self-doc alone is not a reject reason; other values fail-closed.
+- Refactor self-doc policy: `${HOST_REFACTOR_COMMENT_POLICY}` empty/`self-doc-comment` requires Old/New comments that must be present and clear; `none` means missing/illegible self-doc must not be a reject reason. Under `HOST_REFACTOR_COMMENT_POLICY=none`, missing/illegible self-doc alone is not a reject reason; still comment/reject for naming, dead code, complexity, scope creep. Invalid values fail-closed; do not guess.
 
 Out of scope: architecture clause compliance, test coverage, performance.
 
 ## Output
 
-Write `${REVIEW_OUTPUT_PATH}` with frontmatter, Verdict, Evidence, What would change your verdict. Verdicts: approve, comment(advisory), reject(significant quality regression). Phase 8 truth table: reject=0 and approve>=1 may merge; comments do not trigger fix by themselves.
+Write `${REVIEW_OUTPUT_PATH}` with frontmatter, Verdict, Evidence, What would change your verdict. Verdicts: approve, comment(advisory), reject(significant quality regression). Review-gate truth table: reject=0 and approve>=1 may merge; comments do not trigger fix by themselves.
+
+## Verdict
+
+approve | comment | reject
+
+## Evidence
+
+Specific file:line plus concrete issue.
 
 End with marker: `REVIEW_DONE:${PR_NUMBER}:quality:<verdict>`
 
@@ -47,5 +55,7 @@ Only the markers listed above are valid role-routing markers for this prompt. Do
 ## AI 内容标识符(强制)
 
 GitHub content ends with the sentinel as final standalone line; internal marker-bearing artifacts put it penultimate:
+
+sentinel penultimate line before final routing marker.
 
     ⟦AI:AUTO-LOOP⟧

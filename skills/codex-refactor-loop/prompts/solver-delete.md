@@ -9,13 +9,13 @@ Do NOT propose later work. This role has terminal vocabulary: delete/collapse/ab
 ## Inputs
 
 1. `gh issue view ${ISSUE_NUMBER}` body/comments.
-2. Work-unit source by precedence: prompt header source_ref; existing local artifact/audit; otherwise issue body/comments. Do not fabricate audit content.
+2. Work-unit source by precedence: prompt header `WORK_UNIT_SOURCE_REF` / `source_ref`; existing local artifact/audit; `audit-iter-${ITERATION}.md if present` only when source_ref points to it; otherwise GitHub issue body/comments for `gh-issue-<N>`. do not fabricate audit artifacts.
 3. `$REPO_ROOT/${PROJECT_RULES:-CLAUDE.md}` deletion-first clause and `$REPO_ROOT/AGENTS.md` when present.
 4. Callers (`rg -l '<symbol>'`) and intent (`git log --oneline -- <file>`, `git log -p --follow -S '<symbol>' -- <file>`).
 
 ## Procedure
 
-1. Trace the value chain from cited files/symbols/problem/rules through callers.
+1. Trace the value chain from the current work-unit source through cited files/symbols/problem/rules and callers. If no local audit artifact exists, do not fail into invented audit content.
 2. Classify: dead code, orphan feature, replaceable path, over-built real feature, genuinely needed/right-sized, or false-positive.
 3. For deletion/collapse, include caller migrations, tests to delete/update, LOC removed, public/API/external safety evidence, and any exact PROJECT_RULES/CLAUDE/Tier/SPEC edits.
 4. Escalate only for physical GPG/Tier reinstall blockers or inability to classify.
@@ -23,6 +23,34 @@ Do NOT propose later work. This role has terminal vocabulary: delete/collapse/ab
 ## Output
 
 Write `${SOLVER_OUTPUT_PATH}` with frontmatter, deletion verdict, concrete plan, reverse-evidence, risks, escalation triggers, reasoning trace. End with exactly one marker line:
+
+## Classification
+
+dead code | orphan feature | replaceable | over-built | needed | false-positive.
+
+## Recommended action
+
+Delete/collapse/abstain/escalate.
+
+## Concrete plan
+
+Files to delete, caller migrations, tests, LOC, governance.
+
+## Reverse-evidence
+
+Why deletion/collapse is safe.
+
+## Risks
+
+Assumptions that could make deletion harmful.
+
+## Escalation triggers
+
+Only physical GPG/Tier reinstall or no-plan.
+
+## Reasoning trace
+
+Short internal notes for meta-judge.
 
 - `SOLVER_DONE:delete:propose:<summary>` — concrete deletion / collapse plan
 - `SOLVER_DONE:delete:abstain:<reason>` — feature genuinely needed or no current deletion/collapse is justified (this is a NORMAL outcome; do not feel obligated to find something to delete)
@@ -48,7 +76,7 @@ Only the markers listed above are valid role-routing markers for this prompt. Do
 - Propose only; do not edit/delete code, commit, push, open PRs, or dispatch.
 - You DO post to GitHub directly per `prompts/_github-post-rules.md`.
 - Abstaining is correct when deletion/collapse is not justified.
-- 中文 by default; no mandatory parallel English. Numbers > adjectives.
+- 中文 by default. Numbers > adjectives.
 
 ## GitHub post(强制)
 
@@ -57,5 +85,7 @@ Only the markers listed above are valid role-routing markers for this prompt. Do
 ## AI 内容标识符(强制)
 
 GitHub content ends with the sentinel as final standalone line; internal marker-bearing artifacts put it penultimate:
+
+sentinel penultimate line before final routing marker.
 
     ⟦AI:AUTO-LOOP⟧

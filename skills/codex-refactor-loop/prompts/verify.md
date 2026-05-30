@@ -13,7 +13,7 @@ Artifact profile: marker-only-work-unit
 
 ## 验证
 
-- 设计一致:按 `${HOST_REFACTOR_COMMENT_POLICY}` 检查 self-doc;`none` 时缺失不是缺陷,新增 Old/New/iteration source comments 是缺陷。抽样确认 `${OLD_PATTERN}` 不再出现在 scope_paths。
+- 设计一致:按 `${HOST_REFACTOR_COMMENT_POLICY}` 检查 self-doc。empty/`self-doc-comment`:缺失任何一处且无合理 not-applicable 说明 → 标记缺陷。`none`: missing Refactor self-documentation is not a defect and must not trigger rework; 新增 `Refactor (...)`, `Old pattern`, `New principle`, or `iterN/cluster` refactor-history source comments → 标记缺陷;摘要需含 `refactor self-doc: not applicable (HOST_REFACTOR_COMMENT_POLICY=none)`。invalid values fail-closed, do not guess。抽样确认 `${OLD_PATTERN}` 不再出现在 scope_paths。
 - 作用域:diff 文件必须在 scope_paths 内,或 implement 摘要有 `SCOPE_EXTEND:<file>:<reason>`。
 - 测试:`verification_hints` 全部通过;无 sleep/delay pacing、skip/disable/手工逃逸。
 - 守卫:若 `$CI_GUARDS` 非空,跑 `bash "$REPO_ROOT/$CI_GUARDS"` 两次;再跑 `${CLUSTER_SPECIFIC_GUARDS}`。

@@ -13,10 +13,10 @@ Artifact profile: marker-only-work-unit
 
 ## 实施约束
 
-- Refactor comments: `${HOST_REFACTOR_COMMENT_POLICY}` empty/`self-doc-comment` 要求按 `${HOST_COMMENT_RULE}` 或文件风格给每个重构类/关键方法 3-5 行自说明,含 `Refactor (iter${ITERATION}/${CLUSTER_ID})`, `Old pattern`, `New principle`;`none` 禁止新增这些 source comments,摘要写 `refactor self-doc: not applicable (HOST_REFACTOR_COMMENT_POLICY=none)`;其它值 fail-closed。
+- Refactor comments: `${HOST_REFACTOR_COMMENT_POLICY}` empty/`self-doc-comment` 要求按 `${HOST_COMMENT_RULE}` 或文件风格给每个重构类/关键方法 3-5 行自说明,含 `Refactor (iter${ITERATION}/${CLUSTER_ID}):`, `Old pattern: ${OLD_PATTERN}`, `New principle: ${NEW_PRINCIPLE}`;`none` 时 MUST NOT add `Refactor (...)`, `Old pattern`, `New principle`, or `iterN/cluster` refactor-history source comments,摘要写 `refactor self-doc: not applicable (HOST_REFACTOR_COMMENT_POLICY=none)`;其它值 invalid, fail-closed, do not guess。
 - 不新增功能、接口、flag、模块;极小 helper 必须标注 "refactor helper, no behavior change"。
 - 测试按 `verification_hints`;失败修复,最多 5 轮;禁 skip/disable 和 sleep/delay 断言节奏。
-- Build/Test 在 source `host.env` 的 shell 中执行 `bash -lc "$BUILD_CMD"` / `bash -lc "$TEST_CMD"`。
+- BUILD_CMD / TEST_CMD are shell command string values;在 source `host.env` 的 shell 中执行 `bash -lc "$BUILD_CMD"` / `bash -lc "$TEST_CMD"`。
 - 若 `${HOST_PROTO_POLICY}` 非空或 diff 改 schema/protocol,按 host policy 本地重生成/验证。
 - 不依赖 `$EXTERNAL_REPOS` 改动。
 

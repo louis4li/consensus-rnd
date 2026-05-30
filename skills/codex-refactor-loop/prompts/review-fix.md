@@ -15,11 +15,32 @@ Fix actionable blocking reviewer feedback for PR `${PR_NUMBER}` round `${FIX_ROU
 
 1. Classify each reviewer demand as apply, false-positive, or blocked(conflict/human-decision/build-broken/other). Demands citing PROJECT_RULES verbatim are presumed valid unless disproven.
 2. Before touching files outside PR diff, emit `SCOPE_EXTEND:<file>:<reason>` in the fix report path context if the caller supports it; otherwise block rather than silently widening.
-3. Apply minimal fixes only; no unrelated cleanup, no reverting the cluster, no skips, no sleep/delay, no new packages.
-4. Run relevant build/tests/guards. If build remains broken, emit build-broken.
-5. Write `${FIX_OUTPUT_PATH}` with Applied, Rejected as false positive(with proof), Blocked, Build status, Recommendation.
+3. Preserve/add refactor self-doc comments only when `${HOST_REFACTOR_COMMENT_POLICY}` is empty/`self-doc-comment`; invalid values fail-closed, do not guess. When `${HOST_REFACTOR_COMMENT_POLICY}=none`, reviewer demands for missing self-doc are host-policy conflicts; classify it as a host-policy conflict/false-positive.
+4. Apply minimal fixes only; no unrelated cleanup, no reverting the cluster, no skips, no sleep/delay, no new packages.
+5. Run relevant build/tests/guards. If build remains broken, emit build-broken.
+6. Write `${FIX_OUTPUT_PATH}` with Applied, Rejected as false positive(with proof), Blocked, Build status, Recommendation.
 
-End with exactly one marker:
+## Applied
+
+List applied fixes.
+
+## Rejected as false positive
+
+List rejected demands with proof.
+
+## Blocked
+
+List unresolved demands.
+
+## Build status
+
+build/tests status.
+
+## Recommendation for next round
+
+Expected next controller action.
+
+End your output with EXACTLY one of:
 
 - `FIX_DONE:${PR_NUMBER}:round-${FIX_ROUND}:applied-<N>:rejected-<M>:blocked-<K>`
 - `FIX_BLOCKED:${PR_NUMBER}:round-${FIX_ROUND}:<conflict|human-decision|build-broken|other>:<short>`
@@ -47,5 +68,7 @@ Only the markers listed above are valid role-routing markers for this prompt. Do
 ## AI 内容标识符(强制)
 
 GitHub content ends with the sentinel as final standalone line; internal marker-bearing artifacts put it penultimate:
+
+sentinel penultimate line before final routing marker.
 
     ⟦AI:AUTO-LOOP⟧
