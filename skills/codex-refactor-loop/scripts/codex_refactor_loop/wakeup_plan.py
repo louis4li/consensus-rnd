@@ -208,6 +208,8 @@ class GhItem:
     body: str = ""
     updated_at: str = ""
     is_draft: bool = False
+    author_login: str = ""
+    assignee_logins: tuple[str, ...] = ()
 
     @property
     def item(self) -> str:
@@ -1389,7 +1391,7 @@ def _latest_completed_marker_candidates(candidates: list[CompletedMarkerCandidat
             latest_keys[key] = rank
 
     kept: list[CompletedMarkerCandidate] = []
-    for candidate, record in zip(candidates, keyed, strict=True):
+    for candidate, record in zip(candidates, keyed):
         if record is None:
             kept.append(candidate)
             continue
@@ -2277,7 +2279,30 @@ def load_github_items(repo_root: Path) -> list[GhItem]:
     return items
 
 
+def managed_work_user_scope_enabled(ctx: LoopContext) -> bool:
+    return str(ctx.host_env.get("MANAGED_WORK_USER_SCOPE_ENABLE", "true") or "true").strip().lower() in TRUE_LIKE_VALUES
+
+
+def managed_work_user_scope_unavailable_action() -> dict[str, Any]:
+    return {
+        "priority": 1,
+        "kind": "managed-work-user-scope-unavailable",
+        "item": None,
+        "phase": "bootstrap",
+        "actor": "wakeup-plan",
+        "route": "managed-work-user-scope",
+        "reason": "current-github-login-unavailable",
+        "status_only": True,
+        "no_lifecycle_authority": True,
+    }
+
+
 def load_github_items_with_status(repo_root: Path) -> tuple[list[GhItem], bool]:
+    items, loaded_ok, _user_scope_unavailable = load_github_items_projection(repo_root)
+    return items, loaded_ok
+
+
+def load_github_items_projection(repo_root: Path) -> tuple[list[GhItem], bool, bool]:
     ctx = LoopContext.load(repo_root=repo_root, env=os.environ, cwd=repo_root, read_only=True)
     snapshot = load_open_managed_work_snapshot(ctx)
     items: list[GhItem] = []
@@ -2287,7 +2312,7 @@ def load_github_items_with_status(repo_root: Path) -> tuple[list[GhItem], bool]:
             file=sys.stderr,
             flush=True,
         )
-        return items, False
+        return items, False, snapshot.reason == "current-github-login-unavailable"
     for raw in snapshot.items:
         number = raw.number
         labels = tuple(str(label) for label in raw.labels if str(label))
@@ -2303,14 +2328,22 @@ def load_github_items_with_status(repo_root: Path) -> tuple[list[GhItem], bool]:
                 body=raw.body if kind == "PR" else "",
                 updated_at=raw.updated_at,
                 is_draft=raw.is_draft if kind == "PR" else False,
+                author_login=raw.author_login,
+                assignee_logins=raw.assignee_logins,
             )
         )
-    return items, True
+    return items, True, False
 
 
 def load_default_issue_intake_candidates(repo_root: Path, ctx: LoopContext) -> list[GhItem]:
     if not default_issue_intake_enabled(ctx.host_env) or not ctx.gh_repo_slug:
         return []
+    current_login = ""
+    if managed_work_user_scope_enabled(ctx):
+        login_data = run_json(["gh", "api", "user"], cwd=repo_root)
+        if not isinstance(login_data, dict) or not login_data.get("login"):
+            return []
+        current_login = str(login_data["login"])
     data = run_json(
         [
             "gh",
@@ -2321,7 +2354,7 @@ def load_default_issue_intake_candidates(repo_root: Path, ctx: LoopContext) -> l
             "--limit",
             "50",
             "--json",
-            "number,title,labels,updatedAt",
+            "number,title,labels,updatedAt,author,assignees",
         ],
         cwd=repo_root,
     )
@@ -2338,6 +2371,10 @@ def load_default_issue_intake_candidates(repo_root: Path, ctx: LoopContext) -> l
         labels = _json_label_names(raw.get("labels"))
         if label_catalog.MANAGED in label_catalog.normalize_label_set(labels).canonical:
             continue
+        author_login = _json_author_login(raw.get("author"))
+        assignee_logins = _json_assignee_logins(raw.get("assignees"))
+        if current_login and author_login != current_login and current_login not in assignee_logins:
+            continue
         items.append(
             GhItem(
                 kind="issue",
@@ -2345,6 +2382,8 @@ def load_default_issue_intake_candidates(repo_root: Path, ctx: LoopContext) -> l
                 title=str(raw.get("title") or ""),
                 labels=tuple(labels),
                 updated_at=str(raw.get("updatedAt") or ""),
+                author_login=author_login,
+                assignee_logins=assignee_logins,
             )
         )
     return items
@@ -2354,6 +2393,18 @@ def _json_label_names(raw_labels: Any) -> list[str]:
     if not isinstance(raw_labels, list):
         return []
     return [str(item.get("name") or "") for item in raw_labels if isinstance(item, dict) and item.get("name")]
+
+
+def _json_author_login(raw_author: Any) -> str:
+    if not isinstance(raw_author, dict):
+        return ""
+    return str(raw_author.get("login") or "")
+
+
+def _json_assignee_logins(raw_assignees: Any) -> tuple[str, ...]:
+    if not isinstance(raw_assignees, list):
+        return ()
+    return tuple(str(item.get("login") or "") for item in raw_assignees if isinstance(item, dict) and item.get("login"))
 
 
 def git_text(cmd: list[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
@@ -4334,7 +4385,7 @@ def build_plan(repo_root: Path) -> dict[str, Any]:
     os.environ.update(ctx.env_for_subprocess())
 
     health = daemon_health(repo_root)
-    gh_items, gh_items_loaded = load_github_items_with_status(repo_root)
+    gh_items, gh_items_loaded, user_scope_unavailable = load_github_items_projection(repo_root)
     audit_none_fixed_point = latest_controller_validated_audit_none(repo_root)
     concurrency_module = import_concurrency_monitor(repo_root)
     monitor = build_concurrency_monitor(repo_root, concurrency_module)
@@ -4346,12 +4397,15 @@ def build_plan(repo_root: Path) -> dict[str, Any]:
         monitor=monitor,
         concurrency_module=concurrency_module,
         release_rollup_actions=rollup_auto_merge_actions,
-        audit_fallback_eligible=audit_none_fixed_point and audit_fallback_enabled(ctx),
+        audit_fallback_eligible=audit_none_fixed_point and audit_fallback_enabled(ctx) and not user_scope_unavailable,
     )
 
     actions: list[dict[str, Any]] = []
     actions.extend(pending_bootstrap_actions(ctx, health))
-    actions.extend(harness_spawn_intent_actions(repo_root, ctx, monitor, gh_items, gh_items_loaded))
+    if user_scope_unavailable:
+        actions.append(managed_work_user_scope_unavailable_action())
+    else:
+        actions.extend(harness_spawn_intent_actions(repo_root, ctx, monitor, gh_items, gh_items_loaded))
     actions.extend(maintainer_comment_actions(repo_root, gh_items))
     actions.extend(unpushed_worker_output_actions(repo_root, gh_items))
     actions.extend(review_evidence_redispatch_actions(repo_root, gh_items if gh_items_loaded else [], ctx))
@@ -4383,7 +4437,7 @@ def build_plan(repo_root: Path) -> dict[str, Any]:
         actions.extend(host_actions)
     actions.extend(release_countdown_actions(repo_root, gh_items))
     actions.extend(existing_issue_actions(gh_items, repo_root))
-    if gh_items_loaded and not has_dispatchable_action(actions):
+    if gh_items_loaded and not user_scope_unavailable and not has_dispatchable_action(actions):
         actions.extend(default_issue_intake_actions(load_default_issue_intake_candidates(repo_root, ctx), ctx))
     suppress_stale_unexecutable_actions(actions, repo_root=repo_root, gh_items=gh_items, gh_items_loaded=gh_items_loaded)
     actions.extend(implementation_pr_artifact_repair_actions(actions, repo_root))
@@ -4392,7 +4446,7 @@ def build_plan(repo_root: Path) -> dict[str, Any]:
         actions.extend(repository_stalled_meta_reflector_actions(repo_root, ctx, gh_items, monitor))
     serialize_conflicting_consensus_implementation_actions(actions)
     restore_hard_gate_for_dispatchable_actions(concurrency, actions)
-    fallback = audit_fallback_action(ctx, concurrency, actions)
+    fallback = audit_fallback_action(ctx, concurrency, actions) if not user_scope_unavailable else None
     if fallback is not None:
         actions.append(fallback)
     actions.sort(key=action_priority_sort_key)

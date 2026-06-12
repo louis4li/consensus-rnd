@@ -32,7 +32,9 @@ class ManagedWorkSnapshotTests(unittest.TestCase):
         self.tmp = Path(tempfile.mkdtemp(prefix="managed-work-snapshot-"))
         (self.tmp / ".config" / "consensus-rnd").mkdir(parents=True)
         (self.tmp / ".config" / "consensus-rnd" / "host.env").write_text(
-            f'export REPO_ROOT="{self.tmp}"\nexport GH_REPO_SLUG="owner/repo"\n',
+            f'export REPO_ROOT="{self.tmp}"\n'
+            'export GH_REPO_SLUG="owner/repo"\n'
+            'export MANAGED_WORK_USER_SCOPE_ENABLE="false"\n',
             encoding="utf-8",
         )
         self.ctx = LoopContext.load(repo_root=self.tmp, env={"CONSENSUS_RND_HOST_ENV": ".config/consensus-rnd/host.env"})
@@ -59,6 +61,8 @@ class ManagedWorkSnapshotTests(unittest.TestCase):
                                             "number": 516,
                                             "title": "snapshot",
                                             "updatedAt": "2026-06-05T00:00:00Z",
+                                            "author": {"login": "me"},
+                                            "assignees": {"nodes": [{"login": "reviewer"}]},
                                             "labels": {
                                                 "nodes": [
                                                     {"name": label_catalog.MANAGED},
@@ -72,6 +76,8 @@ class ManagedWorkSnapshotTests(unittest.TestCase):
                                             "number": 12,
                                             "title": "pr",
                                             "updatedAt": "2026-06-05T00:01:00Z",
+                                            "author": {"login": "bot"},
+                                            "assignees": {"nodes": [{"login": "me"}]},
                                             "body": "Closes #516",
                                             "headRefName": "refactor/iter516-issue-516",
                                             "headRefOid": "abc1234",
@@ -108,13 +114,174 @@ class ManagedWorkSnapshotTests(unittest.TestCase):
             self.assertNotIn("issue list", " ".join(command))
             self.assertNotIn("pr list", " ".join(command))
             self.assertNotIn("pr view", " ".join(command))
+        issue = next(item for item in result.items if item.kind == "issue")
+        self.assertEqual("me", issue.author_login)
+        self.assertEqual(("reviewer",), issue.assignee_logins)
         pr = next(item for item in result.items if item.kind == "PR")
         self.assertEqual("refactor/iter516-issue-516", pr.head_ref)
         self.assertEqual("Closes #516", pr.body)
+        self.assertEqual("bot", pr.author_login)
+        self.assertEqual(("me",), pr.assignee_logins)
         written = json.loads(snapshot.state_path.read_text(encoding="utf-8"))
+        written_pr = next(item for item in written["items"] if item["kind"] == "PR")
+        self.assertEqual("bot", written_pr["author_login"])
+        self.assertEqual(["me"], written_pr["assignee_logins"])
         self.assertTrue(written["not_live_state_fact_source"])
         self.assertTrue(written["not_host_production_ssot"])
         self.assertTrue(written["no_lifecycle_authority"])
+
+    def test_user_scope_is_applied_by_default_to_snapshot_consumers(self) -> None:
+        (self.tmp / ".config" / "consensus-rnd" / "host.env").write_text(
+            f'export REPO_ROOT="{self.tmp}"\nexport GH_REPO_SLUG="owner/repo"\n',
+            encoding="utf-8",
+        )
+        ctx = LoopContext.load(repo_root=self.tmp, env={"CONSENSUS_RND_HOST_ENV": ".config/consensus-rnd/host.env"})
+
+        def runner(command):
+            if command == ["gh", "api", "user"]:
+                return subprocess.CompletedProcess(command, 0, json.dumps({"login": "me"}), "")
+            if command[:3] == ["gh", "api", "graphql"]:
+                return subprocess.CompletedProcess(
+                    command,
+                    0,
+                    json.dumps(
+                        {
+                            "data": {
+                                "search": {
+                                    "nodes": [
+                                        {
+                                            "__typename": "Issue",
+                                            "number": 516,
+                                            "title": "authored",
+                                            "updatedAt": "2026-06-05T00:00:00Z",
+                                            "author": {"login": "me"},
+                                            "assignees": {"nodes": []},
+                                            "labels": {"nodes": [{"name": label_catalog.MANAGED}]},
+                                        },
+                                        {
+                                            "__typename": "Issue",
+                                            "number": 517,
+                                            "title": "other",
+                                            "updatedAt": "2026-06-05T00:01:00Z",
+                                            "author": {"login": "someone-else"},
+                                            "assignees": {"nodes": []},
+                                            "labels": {"nodes": [{"name": label_catalog.MANAGED}]},
+                                        },
+                                        {
+                                            "__typename": "Issue",
+                                            "number": 518,
+                                            "title": "assigned",
+                                            "updatedAt": "2026-06-05T00:02:00Z",
+                                            "author": {"login": "someone-else"},
+                                            "assignees": {"nodes": [{"login": "me"}]},
+                                            "labels": {"nodes": [{"name": label_catalog.MANAGED}]},
+                                        },
+                                        {
+                                            "__typename": "PullRequest",
+                                            "number": 12,
+                                            "title": "child authored issue PR",
+                                            "updatedAt": "2026-06-05T00:03:00Z",
+                                            "author": {"login": "bot"},
+                                            "assignees": {"nodes": []},
+                                            "body": "Closes #516",
+                                            "headRefName": "impl/516",
+                                            "headRefOid": "abc12",
+                                            "labels": {"nodes": [{"name": label_catalog.MANAGED}]},
+                                        },
+                                        {
+                                            "__typename": "PullRequest",
+                                            "number": 13,
+                                            "title": "directly assigned PR",
+                                            "updatedAt": "2026-06-05T00:04:00Z",
+                                            "author": {"login": "bot"},
+                                            "assignees": {"nodes": [{"login": "me"}]},
+                                            "body": "",
+                                            "headRefName": "impl/direct",
+                                            "headRefOid": "abc13",
+                                            "labels": {"nodes": [{"name": label_catalog.MANAGED}]},
+                                        },
+                                        {
+                                            "__typename": "PullRequest",
+                                            "number": 14,
+                                            "title": "other issue PR",
+                                            "updatedAt": "2026-06-05T00:05:00Z",
+                                            "author": {"login": "bot"},
+                                            "assignees": {"nodes": []},
+                                            "body": "Closes #517",
+                                            "headRefName": "impl/517",
+                                            "headRefOid": "abc14",
+                                            "labels": {"nodes": [{"name": label_catalog.MANAGED}]},
+                                        },
+                                        {
+                                            "__typename": "PullRequest",
+                                            "number": 15,
+                                            "title": "ambiguous PR",
+                                            "updatedAt": "2026-06-05T00:06:00Z",
+                                            "author": {"login": "bot"},
+                                            "assignees": {"nodes": []},
+                                            "body": "Closes #516 and Closes #517",
+                                            "headRefName": "impl/multi",
+                                            "headRefOid": "abc15",
+                                            "labels": {"nodes": [{"name": label_catalog.MANAGED}]},
+                                        },
+                                    ]
+                                }
+                            }
+                        }
+                    ),
+                    "",
+                )
+            return subprocess.CompletedProcess(command, 1, "", f"unexpected {command}")
+
+        with mock.patch("codex_refactor_loop.managed_work_snapshot.graphql_headroom_ok", return_value=True):
+            result = ManagedWorkSnapshot(ctx, runner=runner, now=lambda: 1000).load()
+
+        self.assertTrue(result.loaded_ok)
+        self.assertEqual([("issue", 516), ("issue", 518), ("PR", 12)], [(item.kind, item.number) for item in result.items])
+
+    def test_user_scope_login_failure_fails_closed_for_snapshot_consumers(self) -> None:
+        (self.tmp / ".config" / "consensus-rnd" / "host.env").write_text(
+            f'export REPO_ROOT="{self.tmp}"\nexport GH_REPO_SLUG="owner/repo"\n',
+            encoding="utf-8",
+        )
+        ctx = LoopContext.load(repo_root=self.tmp, env={"CONSENSUS_RND_HOST_ENV": ".config/consensus-rnd/host.env"})
+
+        def runner(command):
+            if command == ["gh", "api", "user"]:
+                return subprocess.CompletedProcess(command, 42, "", "auth failed")
+            if command[:3] == ["gh", "api", "graphql"]:
+                return subprocess.CompletedProcess(
+                    command,
+                    0,
+                    json.dumps(
+                        {
+                            "data": {
+                                "search": {
+                                    "nodes": [
+                                        {
+                                            "__typename": "Issue",
+                                            "number": 516,
+                                            "title": "authored",
+                                            "updatedAt": "2026-06-05T00:00:00Z",
+                                            "author": {"login": "me"},
+                                            "assignees": {"nodes": []},
+                                            "labels": {"nodes": [{"name": label_catalog.MANAGED}]},
+                                        }
+                                    ]
+                                }
+                            }
+                        }
+                    ),
+                    "",
+                )
+            return subprocess.CompletedProcess(command, 1, "", f"unexpected {command}")
+
+        with mock.patch("codex_refactor_loop.managed_work_snapshot.graphql_headroom_ok", return_value=True):
+            result = ManagedWorkSnapshot(ctx, runner=runner, now=lambda: 1000).load()
+
+        self.assertFalse(result.loaded_ok)
+        self.assertEqual("current-github-login-unavailable", result.reason)
+        self.assertEqual((), result.items)
 
     def test_fresh_cache_avoids_github_reads(self) -> None:
         path = self.tmp / STATE_RELATIVE_PATH
@@ -123,7 +290,15 @@ class ManagedWorkSnapshotTests(unittest.TestCase):
             json.dumps(
                 {
                     "fetched_at_epoch": 1000,
-                    "items": [{"kind": "issue", "number": 1, "labels": [label_catalog.MANAGED]}],
+                    "items": [
+                        {
+                            "kind": "issue",
+                            "number": 1,
+                            "labels": [label_catalog.MANAGED],
+                            "author_login": "me",
+                            "assignee_logins": ["reviewer"],
+                        }
+                    ],
                 }
             ),
             encoding="utf-8",
@@ -140,6 +315,8 @@ class ManagedWorkSnapshotTests(unittest.TestCase):
         self.assertTrue(result.loaded_ok)
         self.assertEqual("cache:fresh", result.source)
         self.assertEqual(100, result.age_seconds)
+        self.assertEqual("me", result.items[0].author_login)
+        self.assertEqual(("reviewer",), result.items[0].assignee_logins)
 
     def test_invalidation_drops_fresh_cache_so_next_load_refreshes_open_managed_work(self) -> None:
         path = self.tmp / STATE_RELATIVE_PATH
@@ -212,6 +389,7 @@ class ManagedWorkSnapshotTests(unittest.TestCase):
         (self.tmp / ".config" / "consensus-rnd" / "host.env").write_text(
             f'export REPO_ROOT="{self.tmp}"\n'
             'export GH_REPO_SLUG="owner/repo"\n'
+            'export MANAGED_WORK_USER_SCOPE_ENABLE="false"\n'
             'export MANAGED_WORK_SNAPSHOT_TTL_SECONDS="75"\n'
             'export MANAGED_WORK_SNAPSHOT_STALE_MAX_SECONDS="150"\n',
             encoding="utf-8",
@@ -328,6 +506,8 @@ class ManagedWorkSnapshotTests(unittest.TestCase):
                                 "number": 12,
                                 "title": "pr",
                                 "updated_at": "2026-06-05T00:01:00Z",
+                                "user": {"login": "rest-author"},
+                                "assignees": [{"login": "rest-assignee"}],
                                 "pull_request": {"url": "https://api.github.test/pr/12"},
                                 "labels": [
                                     {"name": label_catalog.MANAGED},
@@ -343,7 +523,15 @@ class ManagedWorkSnapshotTests(unittest.TestCase):
                 return subprocess.CompletedProcess(
                     command,
                     0,
-                    json.dumps({"body": "Closes #516", "headRefName": "refactor/iter516-issue-516", "headRefOid": "abc1234"}),
+                    json.dumps(
+                        {
+                            "body": "Closes #516",
+                            "headRefName": "refactor/iter516-issue-516",
+                            "headRefOid": "abc1234",
+                            "author": {"login": "pr-author"},
+                            "assignees": [{"login": "pr-assignee"}],
+                        }
+                    ),
                     "",
                 )
             return subprocess.CompletedProcess(command, 1, "", "unexpected")
@@ -355,6 +543,8 @@ class ManagedWorkSnapshotTests(unittest.TestCase):
         self.assertTrue(result.loaded_ok)
         self.assertEqual("live", result.source)
         self.assertEqual([("PR", 12)], [(item.kind, item.number) for item in result.items])
+        self.assertEqual("pr-author", result.items[0].author_login)
+        self.assertEqual(("pr-assignee",), result.items[0].assignee_logins)
         self.assertTrue(any(command[:3] == ["gh", "api", "graphql"] for command in calls))
         self.assertTrue(any(command[:2] == ["gh", "api"] and "issues?state=open" in command[2] for command in calls))
         self.assertTrue(any(command[:3] == ["gh", "pr", "view"] for command in calls))

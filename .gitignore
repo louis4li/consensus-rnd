@@ -8,6 +8,7 @@ __pycache__/
 # Host runtime artifacts (created when a skill runs inside a host repo,
 # never part of the published skill source)
 .refactor-loop/
+.config/consensus-rnd/host.env
 
 # Node / 跨平台工具
 node_modules/

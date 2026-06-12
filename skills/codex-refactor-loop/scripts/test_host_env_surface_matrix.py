@@ -170,6 +170,7 @@ class HostEnvSurfaceMatrixTests(unittest.TestCase):
             "ACTIVE_CONTROLLER_TTL_SECONDS": ("1800", "expired lease may be acquired by another device"),
             "MANAGED_WORK_SNAPSHOT_TTL_SECONDS": ("300", "fresh read-only snapshot is reused"),
             "MANAGED_WORK_SNAPSHOT_STALE_MAX_SECONDS": ("900", "discovery returns `loaded_ok=false`"),
+            "MANAGED_WORK_USER_SCOPE_ENABLE": ("true", "false-like values `false`, `0`, `no`, or `off` keep all open managed work routable"),
             "PHASE9_ROUTER_INTERVAL_SECONDS": ("120", "phase9-router daemon command"),
             "WAKEUP_RUNNER_INTERVAL_SECONDS": ("120", "wakeup-runner daemon command"),
             "PATROL_INSPECTOR_ENABLE": ("true", "host-owned explicit false/empty keeps it off"),
@@ -231,6 +232,20 @@ class HostEnvSurfaceMatrixTests(unittest.TestCase):
         self.assertIn("defaulted", self.exports["META_ESCALATION_STUCK_HOURS"]["section"])
         self.assertIn("META_ESCALATION_STUCK_HOURS", read(HOST_ENV_EXAMPLE))
         self.assertIn("test_wakeup_plan.py", meta_escalation["Test owner"])
+
+        user_scope = self.rows["MANAGED_WORK_USER_SCOPE_ENABLE"]
+        self.assertEqual("defaulted", user_scope["Category"])
+        self.assertEqual("shared ManagedWorkSnapshot current-user routing scope", user_scope["Owner"])
+        self.assertIn("managed_work_snapshot", user_scope["Consumer"])
+        self.assertIn("comment-monitor", user_scope["Consumer"])
+        self.assertIn("missing, empty, or true-like values `true`, `1`, `yes`, or `on`", user_scope["Missing/empty behavior"])
+        self.assertIn("issues authored by or assigned to the current `gh api user` login", user_scope["Missing/empty behavior"])
+        self.assertIn("false-like values `false`, `0`, `no`, or `off` keep all open managed work routable", user_scope["Missing/empty behavior"])
+        self.assertIn("current-login read failure makes the shared snapshot fail closed", user_scope["Missing/empty behavior"])
+        self.assertIn("wakeup-plan emits a status-only unavailable action", user_scope["Missing/empty behavior"])
+        self.assertEqual("true", self.exports["MANAGED_WORK_USER_SCOPE_ENABLE"]["value"])
+        self.assertIn("defaulted", self.exports["MANAGED_WORK_USER_SCOPE_ENABLE"]["section"])
+        self.assertIn("issue author/assignee scope", read(HOST_ENV_EXAMPLE))
 
         whitelist = self.rows["MAINTAINER_WHITELIST"]
         self.assertEqual("conditional-fail-closed", whitelist["Category"])

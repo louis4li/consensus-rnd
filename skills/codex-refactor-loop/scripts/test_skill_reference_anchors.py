@@ -1033,6 +1033,8 @@ class SkillReferenceAnchorTests(unittest.TestCase):
         self.assertIn("`.refactor-loop/locks/managed-work-snapshot.lock`", self.skill)
         self.assertIn("`MANAGED_WORK_SNAPSHOT_TTL_SECONDS=300`", self.skill)
         self.assertIn("`MANAGED_WORK_SNAPSHOT_STALE_MAX_SECONDS=900`", self.skill)
+        self.assertIn("`$MANAGED_WORK_USER_SCOPE_ENABLE`", self.skill)
+        self.assertIn("issues authored by or assigned to the current `gh api user` login", self.skill)
         self.assertIn("not GitHub live state fact source, not host production SSOT", self.skill)
         self.assertIn("`gh api repos/<slug>/issues/<N>`", self.skill)
         self.assertIn("`gh api repos/<slug>/issues/<N>/comments?per_page=20`", self.skill)
@@ -1174,7 +1176,10 @@ class SkillReferenceAnchorTests(unittest.TestCase):
             "active-active scheduler",
             "generic distributed lock library",
             "#193 metadata-only invariant",
-            "issue/PR `author.login` and `updatedAt` may only be planning/routing/stale read-only metadata",
+            "issue/PR `author.login`, `assignees[].login`, and `updatedAt` may only be planning/routing/stale read-only metadata",
+            "`MANAGED_WORK_USER_SCOPE_ENABLE=true` is a wakeup-plan routing filter only",
+            "issues authored by or assigned to the current `gh api user` login",
+            "current-login read failure emits a status-only unavailable action and fails closed for that scoped routing surface",
             "must not become side-effect authorization",
             "per-work owner authority",
             "claim/lease scope",

@@ -16,6 +16,7 @@ from urllib.parse import quote
 from . import labels as label_catalog
 from .context import LoopContext
 from .github_budget import graphql_headroom_ok
+from .work_items import extract_closing_issue_numbers
 
 
 DEFAULT_TTL_SECONDS = 300
@@ -32,6 +33,14 @@ query($searchQuery: String!, $perPage: Int!) {
         title
         updatedAt
         body
+        author {
+          login
+        }
+        assignees(first: 30) {
+          nodes {
+            login
+          }
+        }
         labels(first: 30) {
           nodes {
             name
@@ -43,6 +52,14 @@ query($searchQuery: String!, $perPage: Int!) {
         title
         updatedAt
         body
+        author {
+          login
+        }
+        assignees(first: 30) {
+          nodes {
+            login
+          }
+        }
         headRefName
         headRefOid
         isDraft
@@ -71,6 +88,8 @@ class ManagedWorkSnapshotItem:
     state: str = "open"
     updated_at: str = ""
     snapshot_source: str = ""
+    author_login: str = ""
+    assignee_logins: tuple[str, ...] = ()
 
     @classmethod
     def from_json(cls, row: Mapping[str, Any]) -> "ManagedWorkSnapshotItem | None":
@@ -94,6 +113,10 @@ class ManagedWorkSnapshotItem:
             state=str(row.get("state") or "open"),
             updated_at=str(row.get("updated_at") or ""),
             snapshot_source=str(row.get("snapshot_source") or ""),
+            author_login=str(row.get("author_login") or ""),
+            assignee_logins=tuple(str(login) for login in row.get("assignee_logins", ()) if str(login))
+            if isinstance(row.get("assignee_logins"), list)
+            else (),
         )
 
     def to_json(self) -> dict[str, Any]:
@@ -109,6 +132,8 @@ class ManagedWorkSnapshotItem:
             "state": self.state,
             "updated_at": self.updated_at,
             "snapshot_source": self.snapshot_source,
+            "author_login": self.author_login,
+            "assignee_logins": list(self.assignee_logins),
         }
 
 
@@ -183,7 +208,7 @@ class ManagedWorkSnapshot:
                     return stale
                 return ManagedWorkSnapshotResult((), False, "unavailable", "fetch-failed", self._cache_age_seconds(cached))
             self._write_cache(items)
-            return ManagedWorkSnapshotResult(tuple(items), True, "live", None, 0.0)
+            return self._scoped_result(tuple(items), "live", None, 0.0)
 
     def _fetch_open_managed_items(self) -> list[ManagedWorkSnapshotItem] | None:
         if not self.ctx.gh_repo_slug:
@@ -227,6 +252,8 @@ class ManagedWorkSnapshot:
                     state="open",
                     updated_at=str(row.get("updatedAt") or ""),
                     snapshot_source="github-open-managed-items",
+                    author_login=_author_login(row.get("author")),
+                    assignee_logins=_assignee_logins(row.get("assignees")),
                 )
             )
         return sorted(items, key=lambda item: (0 if item.kind == "issue" else 1, item.number))
@@ -289,6 +316,8 @@ class ManagedWorkSnapshot:
                             "headRefName": str(details.get("headRefName") or ""),
                             "headRefOid": str(details.get("headRefOid") or ""),
                             "isDraft": bool(details.get("isDraft") is True),
+                            "author": details.get("author"),
+                            "assignees": details.get("assignees"),
                         }
                     )
                 current = rows_by_key.get((typename, number))
@@ -306,7 +335,7 @@ class ManagedWorkSnapshot:
                 "--repo",
                 str(self.ctx.gh_repo_slug),
                 "--json",
-                "body,headRefName,headRefOid,isDraft",
+                "body,headRefName,headRefOid,isDraft,author,assignees",
             ]
         )
         if result.returncode != 0 or not result.stdout.strip():
@@ -376,7 +405,32 @@ class ManagedWorkSnapshot:
             for item in (ManagedWorkSnapshotItem.from_json(row) for row in items if isinstance(row, dict))
             if item is not None
         )
-        return ManagedWorkSnapshotResult(normalized, True, source, None, age)
+        return self._scoped_result(normalized, source, None, age)
+
+    def _scoped_result(
+        self,
+        items: Sequence[ManagedWorkSnapshotItem],
+        source: str,
+        reason: str | None,
+        age_seconds: float | None,
+    ) -> ManagedWorkSnapshotResult:
+        scoped = _scope_managed_work_items(items, self._current_github_login())
+        if scoped is None:
+            return ManagedWorkSnapshotResult((), False, source, "current-github-login-unavailable", age_seconds)
+        return ManagedWorkSnapshotResult(scoped, True, source, reason, age_seconds)
+
+    def _current_github_login(self) -> str | None:
+        if not _managed_work_user_scope_enabled(self.ctx):
+            return ""
+        result = self._run(["gh", "api", "user"])
+        if result.returncode != 0 or not result.stdout.strip():
+            return None
+        try:
+            data = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            return None
+        login = str(data.get("login") or "").strip() if isinstance(data, dict) else ""
+        return login or None
 
     def _cache_age_seconds(self, data: dict[str, Any] | None) -> float | None:
         if not data:
@@ -430,6 +484,37 @@ def _ctx_host_env_int(ctx: LoopContext, name: str, default: int) -> int:
         return default
 
 
+def _managed_work_user_scope_enabled(ctx: LoopContext) -> bool:
+    value = str(ctx.host_env.get("MANAGED_WORK_USER_SCOPE_ENABLE", "true") or "true").strip().lower()
+    return value in {"true", "1", "yes", "on"}
+
+
+def _scope_managed_work_items(
+    items: Sequence[ManagedWorkSnapshotItem],
+    current_login: str | None,
+) -> tuple[ManagedWorkSnapshotItem, ...] | None:
+    if current_login == "":
+        return tuple(items)
+    if current_login is None:
+        return None
+    in_scope_issue_numbers = {
+        item.number
+        for item in items
+        if item.kind == "issue" and (item.author_login == current_login or current_login in item.assignee_logins)
+    }
+    return tuple(
+        item
+        for item in items
+        if (item.kind == "issue" and item.number in in_scope_issue_numbers)
+        or (
+            item.kind == "PR"
+            and (closing_issue_numbers := extract_closing_issue_numbers(item.body))
+            and len(closing_issue_numbers) == 1
+            and closing_issue_numbers[0] in in_scope_issue_numbers
+        )
+    )
+
+
 def _positive_int(value: int | None, default: int) -> int:
     try:
         parsed = int(default if value is None else value)
@@ -448,11 +533,28 @@ def _escape_search_label(label: str) -> str:
     return label.replace("\\", "\\\\").replace('"', '\\"')
 
 
+def _author_login(raw_author: Any) -> str:
+    if not isinstance(raw_author, dict):
+        return ""
+    return str(raw_author.get("login") or "")
+
+
+def _assignee_logins(raw_assignees: Any) -> tuple[str, ...]:
+    nodes = (raw_assignees or {}).get("nodes") if isinstance(raw_assignees, dict) else raw_assignees
+    if not isinstance(nodes, list):
+        return ()
+    return tuple(str(item.get("login") or "") for item in nodes if isinstance(item, dict) and item.get("login"))
+
+
 def _legacy_rest_row_to_graphql_node(row: dict[str, Any]) -> dict[str, Any]:
     node = dict(row)
     node["__typename"] = "PullRequest" if row.get("pull_request") else "Issue"
     if "updatedAt" not in node and "updated_at" in row:
         node["updatedAt"] = row.get("updated_at")
+    if "author" not in node and isinstance(row.get("user"), dict):
+        node["author"] = {"login": row["user"].get("login")}
+    if "assignees" not in node and isinstance(row.get("assignees"), list):
+        node["assignees"] = row.get("assignees")
     labels = row.get("labels")
     if isinstance(labels, list):
         node["labels"] = {"nodes": labels}

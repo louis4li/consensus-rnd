@@ -41,6 +41,7 @@ from codex_refactor_loop.wakeup_plan import (  # noqa: E402
     consensus_implementation_suppressed_reason,
     existing_issue_actions,
     has_dispatchable_action,
+    load_github_items_projection,
     load_github_items_with_status,
     marker_from_completed_log,
     meta_escalation_stuck_seconds,
@@ -128,7 +129,7 @@ class WakeupPlanBehaviorTests(unittest.TestCase):
         self.fakebin.mkdir()
         (self.repo / ".config" / "consensus-rnd").mkdir(parents=True, exist_ok=True)
         (self.repo / ".config" / "consensus-rnd" / "host.env").write_text(
-            f"REPO_ROOT={self.repo}\nGH_REPO_SLUG=owner/repo\nCODEX_FLOOR=5\nINTEGRATION_BRANCH=auto-refact-dev\n",
+            f"REPO_ROOT={self.repo}\nGH_REPO_SLUG=owner/repo\nCODEX_FLOOR=5\nINTEGRATION_BRANCH=auto-refact-dev\nMANAGED_WORK_USER_SCOPE_ENABLE=false\n",
             encoding="utf-8",
         )
         (self.repo / ".refactor-loop" / ".controller-pending-events.log").write_text("", encoding="utf-8")
@@ -204,7 +205,7 @@ class WakeupPlanBehaviorTests(unittest.TestCase):
         self.assertEqual([], actions)
 
     def test_load_default_issue_intake_candidates_filters_managed_labels(self) -> None:
-        ctx = mock.Mock(host_env={}, gh_repo_slug="owner/repo")
+        ctx = mock.Mock(host_env={"MANAGED_WORK_USER_SCOPE_ENABLE": "false"}, gh_repo_slug="owner/repo")
         payload = [
             {"number": 88, "title": "new", "labels": [], "updatedAt": "2026-06-07T00:00:00Z"},
             {"number": 89, "title": "managed", "labels": [{"name": label_catalog.MANAGED}], "updatedAt": ""},
@@ -214,6 +215,32 @@ class WakeupPlanBehaviorTests(unittest.TestCase):
 
         self.assertEqual([88], [item.number for item in candidates])
         run_json_mock.assert_called_once()
+
+    def test_load_default_issue_intake_candidates_applies_current_user_scope_by_default(self) -> None:
+        ctx = mock.Mock(host_env={}, gh_repo_slug="owner/repo")
+        payload = [
+            {"number": 88, "title": "authored", "labels": [], "updatedAt": "2026-06-07T00:00:00Z", "author": {"login": "me"}, "assignees": []},
+            {"number": 89, "title": "assigned", "labels": [], "updatedAt": "2026-06-07T00:01:00Z", "author": {"login": "other"}, "assignees": [{"login": "me"}]},
+            {"number": 90, "title": "other", "labels": [], "updatedAt": "2026-06-07T00:02:00Z", "author": {"login": "other"}, "assignees": []},
+        ]
+
+        def fake_run_json(command, *, cwd):
+            if command == ["gh", "api", "user"]:
+                return {"login": "me"}
+            return payload
+
+        with mock.patch("codex_refactor_loop.wakeup_plan.run_json", side_effect=fake_run_json):
+            candidates = load_default_issue_intake_candidates(self.repo, ctx)
+
+        self.assertEqual([88, 89], [item.number for item in candidates])
+
+    def test_load_default_issue_intake_candidates_fails_closed_when_user_scope_login_unavailable(self) -> None:
+        ctx = mock.Mock(host_env={}, gh_repo_slug="owner/repo")
+
+        with mock.patch("codex_refactor_loop.wakeup_plan.run_json", return_value=None):
+            candidates = load_default_issue_intake_candidates(self.repo, ctx)
+
+        self.assertEqual([], candidates)
 
     def test_rebase_resolve_actions_fetch_live_mergeability_for_snapshot_pr(self) -> None:
         item = GhItem(
@@ -765,6 +792,13 @@ class WakeupPlanBehaviorTests(unittest.TestCase):
                   exit 0
                 fi
                   if [[ "$cmd1" == "api" ]]; then
+                  if [[ "$api_path" == "user" ]]; then
+                    if [[ "$fixture" == "user_scope_login_failure" ]]; then
+                      exit 42
+                    fi
+                    printf '{"login":"me"}\n'
+                    exit 0
+                  fi
                   if [[ -n "${WAKEUP_PLAN_GH_QUERY_LOG:-}" && "$api_path" == repos/owner/repo/milestones* ]]; then
                     printf 'api milestones\n' >> "$WAKEUP_PLAN_GH_QUERY_LOG"
                   fi
@@ -911,8 +945,25 @@ class WakeupPlanBehaviorTests(unittest.TestCase):
         )
 
     def managed_work_snapshot_items(self, fixture: str) -> list[dict[str, object]]:
-        def issue(number: int, title: str, labels: list[str], *, updated_at: str = "2026-06-05T00:00:00Z") -> dict[str, object]:
-            return {"kind": "issue", "number": number, "title": title, "labels": labels, "state": "open", "updated_at": updated_at}
+        def issue(
+            number: int,
+            title: str,
+            labels: list[str],
+            *,
+            updated_at: str = "2026-06-05T00:00:00Z",
+            author_login: str = "",
+            assignee_logins: tuple[str, ...] = (),
+        ) -> dict[str, object]:
+            return {
+                "kind": "issue",
+                "number": number,
+                "title": title,
+                "labels": labels,
+                "state": "open",
+                "updated_at": updated_at,
+                "author_login": author_login,
+                "assignee_logins": list(assignee_logins),
+            }
 
         def pr(
             number: int,
@@ -924,6 +975,8 @@ class WakeupPlanBehaviorTests(unittest.TestCase):
             body: str = "",
             updated_at: str = "2026-06-05T00:00:00Z",
             is_draft: bool = False,
+            author_login: str = "",
+            assignee_logins: tuple[str, ...] = (),
         ) -> dict[str, object]:
             return {
                 "kind": "PR",
@@ -936,6 +989,8 @@ class WakeupPlanBehaviorTests(unittest.TestCase):
                 "is_draft": is_draft,
                 "state": "open",
                 "updated_at": updated_at,
+                "author_login": author_login,
+                "assignee_logins": list(assignee_logins),
             }
 
         managed = label_catalog.MANAGED
@@ -981,6 +1036,15 @@ class WakeupPlanBehaviorTests(unittest.TestCase):
                 issue(10, "ordinary issue", [managed, fixing, auto]),
             ],
             "existing": [issue(10, "ordinary issue", [managed, fixing, auto])],
+            "user_scope": [
+                issue(10, "authored issue", [managed, fixing, auto], author_login="me"),
+                issue(11, "assigned issue", [managed, fixing, auto], assignee_logins=("me",)),
+                issue(12, "unrelated issue", [managed, fixing, auto], author_login="someone-else"),
+            ],
+            "user_scope_login_failure": [
+                issue(10, "authored issue", [managed, fixing, auto], author_login="me"),
+                issue(11, "assigned issue", [managed, fixing, auto], assignee_logins=("me",)),
+            ],
             "transition_sort": [
                 issue(60, "unknown issue", [managed, fixing, auto]),
                 issue(61, "positive issue", [managed, fixing, auto]),
@@ -1069,6 +1133,15 @@ class WakeupPlanBehaviorTests(unittest.TestCase):
                 pr(320, "closing PR", [managed, label_catalog.PHASE_REVIEWING, auto], head_ref="refactor/iter20-issue-20", body="Closes #20"),
             ],
             "represented_parent": [pr(255, "child PR", [managed, label_catalog.PHASE_REVIEWING, auto], head_ref="impl/issue239", body="Closes #239")],
+            "user_scope": [
+                pr(111, "child PR for assigned issue", [managed, reviewing, auto], head_ref="impl/issue11", body="Closes #11"),
+                pr(112, "unrelated PR", [managed, reviewing, auto], head_ref="impl/issue12", body="Closes #12"),
+                pr(113, "directly assigned PR", [managed, reviewing, auto], head_ref="impl/direct-pr", assignee_logins=("me",)),
+                pr(114, "multi close PR", [managed, reviewing, auto], head_ref="impl/multi-close", body="Closes #11 and Closes #12"),
+            ],
+            "user_scope_login_failure": [
+                pr(111, "child PR for assigned issue", [managed, reviewing, auto], head_ref="impl/issue11", body="Closes #11"),
+            ],
             "milestone": [pr(30, "milestone PR", [managed, label_catalog.MILESTONE_CURRENT, reviewing, auto])],
             "non_action_statuses": [
                 pr(42, "non-red CI PR", [managed, ci_running, auto]),
@@ -1386,6 +1459,16 @@ class WakeupPlanBehaviorTests(unittest.TestCase):
             if not line.strip().startswith(prefixes)
         ]
         lines.append(f'{key}="{value}"')
+        host_env.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    def remove_host_env_value(self, key: str) -> None:
+        host_env = self.repo / ".config" / "consensus-rnd" / "host.env"
+        prefixes = (f"{key}=", f"export {key}=")
+        lines = [
+            line
+            for line in host_env.read_text(encoding="utf-8").splitlines()
+            if not line.strip().startswith(prefixes)
+        ]
         host_env.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     def run_plan(self, *, fixture: str = "empty", ps_count: int = 5, active_audit: bool = False) -> dict:
@@ -4411,7 +4494,7 @@ class WakeupPlanBehaviorTests(unittest.TestCase):
             encoding="utf-8",
         )
         (self.repo / ".config" / "consensus-rnd" / "host.env").write_text(
-            f"REPO_ROOT={self.repo}\nCODEX_FLOOR=5\n",
+            f"REPO_ROOT={self.repo}\nCODEX_FLOOR=5\nMANAGED_WORK_USER_SCOPE_ENABLE=false\n",
             encoding="utf-8",
         )
         self.write_completed_log("fix-pr77-r3.log", "FIX_DONE")
@@ -5648,6 +5731,79 @@ class WakeupPlanBehaviorTests(unittest.TestCase):
         self.assertTrue(action["no_lifecycle_authority"])
         self.assertFalse((self.repo / ".refactor-loop/state/release-decision.json").exists())
         self.assertFalse((self.repo / ".refactor-loop/state/release-candidate.json").exists())
+
+    def test_managed_work_user_scope_is_enabled_by_default(self) -> None:
+        self.remove_host_env_value("MANAGED_WORK_USER_SCOPE_ENABLE")
+
+        plan = self.run_plan(fixture="user_scope")
+
+        existing_items = [action["item"] for action in plan["actions"] if action["kind"] == "existing-issue"]
+        self.assertEqual(existing_items, ["issue #10", "PR #111"])
+        self.assertNotIn("issue #11", existing_items)
+        self.assertNotIn("issue #12", existing_items)
+        self.assertNotIn("PR #112", existing_items)
+        self.assertNotIn("PR #113", existing_items)
+        self.assertNotIn("PR #114", existing_items)
+
+    def test_managed_work_user_scope_can_be_disabled_by_host_env(self) -> None:
+        self.set_host_env_value("MANAGED_WORK_USER_SCOPE_ENABLE", "false")
+
+        plan = self.run_plan(fixture="user_scope")
+
+        existing_items = [action["item"] for action in plan["actions"] if action["kind"] == "existing-issue"]
+        self.assertIn("issue #10", existing_items)
+        self.assertIn("PR #111", existing_items)
+        self.assertIn("PR #112", existing_items)
+        self.assertIn("PR #113", existing_items)
+        self.assertIn("PR #114", existing_items)
+
+    def test_managed_work_user_scope_suppresses_pending_intent_when_current_login_unavailable(self) -> None:
+        self.set_host_env_value("MANAGED_WORK_USER_SCOPE_ENABLE", "true")
+        self.append_harness_spawn_intent(
+            intent_id="phase9-router:10:4:judge",
+            task_id="phase9-issue10-r4-judge",
+            prompt=".refactor-loop/prompts/phase9/phase9-issue10-r4-judge.md",
+            log=".refactor-loop/logs/phase9-issue10-r4-judge.log",
+            reason="issue #10 scoped login failure should suppress this intent",
+        )
+
+        plan = self.run_plan(fixture="user_scope_login_failure")
+
+        self.assertEqual([action for action in plan["actions"] if action["kind"] == "harness-spawn-intent"], [])
+        block = next(action for action in plan["actions"] if action["kind"] == "managed-work-user-scope-unavailable")
+        self.assertTrue(block["status_only"])
+        self.assertEqual("current-github-login-unavailable", block["reason"])
+
+    def test_managed_work_user_scope_fails_closed_when_current_login_unavailable(self) -> None:
+        self.set_host_env_value("MANAGED_WORK_USER_SCOPE_ENABLE", "true")
+
+        plan, stdout = self.run_plan_with_stdout(fixture="user_scope_login_failure")
+
+        self.assertEqual([action for action in plan["actions"] if action["kind"] == "existing-issue"], [])
+        self.assertEqual([action for action in plan["actions"] if action["kind"] == "harness-spawn-intent"], [])
+        self.assertIsNone(plan["recommendation"])
+        self.assertNotIn("RECOMMEND:audit", stdout)
+        self.assertTrue(any(action["kind"] == "managed-work-user-scope-unavailable" for action in plan["actions"]))
+
+    def test_managed_work_user_scope_login_failure_keeps_shared_loader_failed(self) -> None:
+        self.set_host_env_value("MANAGED_WORK_USER_SCOPE_ENABLE", "true")
+        self.write_managed_work_snapshot_fixture("user_scope_login_failure")
+        env = {
+            "PATH": f"{self.fakebin}{os.pathsep}{os.environ.get('PATH', '')}",
+            "CONSENSUS_RND_HOST_ENV": ".config/consensus-rnd/host.env",
+            "GH_REPO_SLUG": "owner/repo",
+            "WAKEUP_PLAN_GH_FIXTURE": "user_scope_login_failure",
+        }
+
+        with mock.patch.dict(os.environ, env, clear=False):
+            items, loaded_ok, user_scope_unavailable = load_github_items_projection(self.repo)
+            public_items, public_loaded_ok = load_github_items_with_status(self.repo)
+
+        self.assertEqual([], items)
+        self.assertFalse(loaded_ok)
+        self.assertTrue(user_scope_unavailable)
+        self.assertEqual([], public_items)
+        self.assertFalse(public_loaded_ok)
 
     def test_release_countdown_fail_soft_when_mapped_manifest_versions_are_not_synchronized(self) -> None:
         (self.repo / ".version-bump.json").write_text(
